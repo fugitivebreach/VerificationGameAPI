@@ -10,11 +10,27 @@ from urllib.parse import urlparse
 
 # Get MySQL connection details from Railway environment variable
 def get_db_config():
-    """Parse DATABASE_URL or use default MySQL settings"""
+    """Parse DATABASE_URL or use Railway's individual MySQL variables"""
+    # Try Railway's individual variables first (MYSQLHOST, MYSQLUSER, etc.)
+    mysql_host = os.environ.get('MYSQLHOST')
+    
+    if mysql_host:
+        # Use Railway's individual environment variables
+        return {
+            'host': mysql_host,
+            'port': int(os.environ.get('MYSQLPORT', 3306)),
+            'user': os.environ.get('MYSQLUSER', 'root'),
+            'password': os.environ.get('MYSQLPASSWORD', ''),
+            'database': os.environ.get('MYSQLDATABASE', 'railway'),
+            'charset': 'utf8mb4',
+            'cursorclass': pymysql.cursors.DictCursor
+        }
+    
+    # Try parsing DATABASE_URL or MYSQL_URL
     database_url = os.environ.get('DATABASE_URL') or os.environ.get('MYSQL_URL')
     
-    if database_url:
-        # Parse Railway's DATABASE_URL
+    if database_url and not database_url.startswith('${{'):
+        # Parse connection string (only if not a template)
         url = urlparse(database_url)
         return {
             'host': url.hostname,
@@ -25,17 +41,17 @@ def get_db_config():
             'charset': 'utf8mb4',
             'cursorclass': pymysql.cursors.DictCursor
         }
-    else:
-        # Fallback for local development
-        return {
-            'host': os.environ.get('MYSQL_HOST', 'localhost'),
-            'port': int(os.environ.get('MYSQL_PORT', 3306)),
-            'user': os.environ.get('MYSQL_USER', 'root'),
-            'password': os.environ.get('MYSQL_PASSWORD', ''),
-            'database': os.environ.get('MYSQL_DATABASE', 'verification_db'),
-            'charset': 'utf8mb4',
-            'cursorclass': pymysql.cursors.DictCursor
-        }
+    
+    # Fallback for local development
+    return {
+        'host': os.environ.get('MYSQL_HOST', 'localhost'),
+        'port': int(os.environ.get('MYSQL_PORT', 3306)),
+        'user': os.environ.get('MYSQL_USER', 'root'),
+        'password': os.environ.get('MYSQL_PASSWORD', ''),
+        'database': os.environ.get('MYSQL_DATABASE', 'verification_db'),
+        'charset': 'utf8mb4',
+        'cursorclass': pymysql.cursors.DictCursor
+    }
 
 
 def init_database():
