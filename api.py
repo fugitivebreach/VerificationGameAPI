@@ -15,6 +15,9 @@ from .database import (
 
 app = Flask(__name__)
 
+# Initialize database on app creation
+init_database()
+
 # API Key
 API_KEY = "RoyalGuard20252026-API"
 
