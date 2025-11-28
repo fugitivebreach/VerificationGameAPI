@@ -2,89 +2,41 @@
 Database management for VerificationAPI
 """
 
-import pymysql
+import sqlite3
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any
-from urllib.parse import urlparse
 
-# Get MySQL connection details from Railway environment variable
-def get_db_config():
-    """Parse DATABASE_URL or use Railway's individual MySQL variables"""
-    # Try Railway's individual variables first (MYSQLHOST, MYSQLUSER, etc.)
-    mysql_host = os.environ.get('MYSQLHOST')
-    
-    if mysql_host:
-        # Use Railway's individual environment variables
-        return {
-            'host': mysql_host,
-            'port': int(os.environ.get('MYSQLPORT', 3306)),
-            'user': os.environ.get('MYSQLUSER', 'root'),
-            'password': os.environ.get('MYSQLPASSWORD', ''),
-            'database': os.environ.get('MYSQLDATABASE', 'railway'),
-            'charset': 'utf8mb4',
-            'cursorclass': pymysql.cursors.DictCursor
-        }
-    
-    # Try parsing DATABASE_URL or MYSQL_URL
-    database_url = os.environ.get('DATABASE_URL') or os.environ.get('MYSQL_URL')
-    
-    if database_url and not database_url.startswith('${{'):
-        # Parse connection string (only if not a template)
-        url = urlparse(database_url)
-        return {
-            'host': url.hostname,
-            'port': url.port or 3306,
-            'user': url.username,
-            'password': url.password,
-            'database': url.path[1:],  # Remove leading '/'
-            'charset': 'utf8mb4',
-            'cursorclass': pymysql.cursors.DictCursor
-        }
-    
-    # Fallback for local development
-    return {
-        'host': os.environ.get('MYSQL_HOST', 'localhost'),
-        'port': int(os.environ.get('MYSQL_PORT', 3306)),
-        'user': os.environ.get('MYSQL_USER', 'root'),
-        'password': os.environ.get('MYSQL_PASSWORD', ''),
-        'database': os.environ.get('MYSQL_DATABASE', 'verification_db'),
-        'charset': 'utf8mb4',
-        'cursorclass': pymysql.cursors.DictCursor
-    }
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'verification.db')
 
 
 def init_database():
-    """Initialize the MySQL database with the verification table"""
-    try:
-        conn = pymysql.connect(**get_db_config())
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS verifications (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                robloxUsername VARCHAR(255) UNIQUE NOT NULL,
-                robloxID VARCHAR(255) NOT NULL,
-                discordUsername VARCHAR(255) NOT NULL,
-                discordID VARCHAR(255) NOT NULL,
-                timeToVerify VARCHAR(255) NOT NULL,
-                joinedGame TINYINT(1) DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_robloxUsername (robloxUsername)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ''')
-        
-        conn.commit()
-        conn.close()
-        print("Database initialized successfully")
-    except Exception as e:
-        print(f"Error initializing database: {e}")
-        raise
+    """Initialize the SQLite database with the verification table"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS verifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            robloxUsername TEXT UNIQUE NOT NULL,
+            robloxID TEXT NOT NULL,
+            discordUsername TEXT NOT NULL,
+            discordID TEXT NOT NULL,
+            timeToVerify TEXT NOT NULL,
+            joinedGame INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
 
 
 def get_connection():
-    """Get a MySQL database connection"""
-    return pymysql.connect(**get_db_config())
+    """Get a database connection"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def add_verification(roblox_username: str, roblox_id: str, discord_username: str, 
@@ -96,13 +48,13 @@ def add_verification(roblox_username: str, roblox_id: str, discord_username: str
         
         cursor.execute('''
             INSERT INTO verifications (robloxUsername, robloxID, discordUsername, discordID, timeToVerify, joinedGame)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (roblox_username, roblox_id, discord_username, discord_id, time_to_verify, int(joined_game)))
         
         conn.commit()
         conn.close()
         return True
-    except pymysql.IntegrityError:
+    except sqlite3.IntegrityError:
         # Username already exists, update instead
         return update_verification(roblox_username, roblox_id, discord_username, discord_id, time_to_verify, joined_game)
     except Exception as e:
@@ -119,8 +71,8 @@ def update_verification(roblox_username: str, roblox_id: str, discord_username: 
         
         cursor.execute('''
             UPDATE verifications 
-            SET robloxID = %s, discordUsername = %s, discordID = %s, timeToVerify = %s, joinedGame = %s
-            WHERE robloxUsername = %s
+            SET robloxID = ?, discordUsername = ?, discordID = ?, timeToVerify = ?, joinedGame = ?
+            WHERE robloxUsername = ?
         ''', (roblox_id, discord_username, discord_id, time_to_verify, int(joined_game), roblox_username))
         
         conn.commit()
@@ -139,7 +91,7 @@ def get_verification_by_username(roblox_username: str) -> Optional[Dict[str, Any
     cursor.execute('''
         SELECT robloxUsername, robloxID, discordUsername, discordID, timeToVerify, joinedGame
         FROM verifications
-        WHERE robloxUsername = %s
+        WHERE robloxUsername = ?
     ''', (roblox_username,))
     
     row = cursor.fetchone()
@@ -165,8 +117,8 @@ def update_joined_game(roblox_username: str, joined_game: bool) -> bool:
         
         cursor.execute('''
             UPDATE verifications 
-            SET joinedGame = %s
-            WHERE robloxUsername = %s
+            SET joinedGame = ?
+            WHERE robloxUsername = ?
         ''', (int(joined_game), roblox_username))
         
         updated = cursor.rowcount > 0
@@ -184,7 +136,7 @@ def delete_verification_by_username(roblox_username: str) -> bool:
         conn = get_connection()
         cursor = conn.cursor()
         
-        cursor.execute('DELETE FROM verifications WHERE robloxUsername = %s', (roblox_username,))
+        cursor.execute('DELETE FROM verifications WHERE robloxUsername = ?', (roblox_username,))
         
         deleted = cursor.rowcount > 0
         conn.commit()
