@@ -4,7 +4,7 @@ Flask API for VerificationAPI
 
 from flask import Flask, request, jsonify
 from functools import wraps
-from .database import (
+from database import (
     init_database, 
     add_verification, 
     get_verification_by_username, 
