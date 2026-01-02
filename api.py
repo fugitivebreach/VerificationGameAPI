@@ -198,6 +198,21 @@ def delete_verification(roblox_username):
         }), 500
 
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint"""
+    return jsonify({
+        'returnCode': 200,
+        'response': 'VerificationAPI is running',
+        'endpoints': [
+            'GET /api/health',
+            'POST /api/verification',
+            'GET /api/verification/<username>',
+            'DELETE /api/verification/<username>'
+        ]
+    }), 200
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint (no API key required)"""
