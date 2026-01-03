@@ -1,22 +1,16 @@
 """
-Flask API for VerificationAPI
+Flask API for VerificationAPI - In-Memory Storage
 """
 
 from flask import Flask, request, jsonify
 from functools import wraps
-from database import (
-    init_database, 
-    add_verification, 
-    get_verification_by_username, 
-    delete_verification_by_username,
-    update_joined_game,
-    check_and_delete_expired
-)
+from datetime import datetime
 
 app = Flask(__name__)
 
-# Initialize database on app creation
-init_database()
+# In-memory storage for verifications
+# Structure: {roblox_username_lower: {"robloxUsername": str, "robloxID": str, "discordUsername": str, "discordID": str, "timeToVerify": str, "joinedGame": bool}}
+verifications = {}
 
 # API Key
 API_KEY = "RoyalGuard20252026-API"
@@ -59,13 +53,10 @@ def create_verification():
         
         # Check if this is a joinedGame-only update
         if 'joinedGame' in data and len(data) == 2 and 'robloxUsername' in data:
-            # Update only joinedGame field
-            success = update_joined_game(
-                data['robloxUsername'],
-                data['joinedGame']
-            )
+            username_lower = data['robloxUsername'].lower()
             
-            if success:
+            if username_lower in verifications:
+                verifications[username_lower]['joinedGame'] = data['joinedGame']
                 return jsonify({
                     'returnCode': 200,
                     'response': 'joinedGame updated successfully',
@@ -90,32 +81,27 @@ def create_verification():
         # Get joinedGame value (defaults to False)
         joined_game = data.get('joinedGame', False)
         
-        # Add verification to database
-        success = add_verification(
-            data['robloxUsername'],
-            data['robloxID'],
-            data['discordUsername'],
-            data['discordID'],
-            data['timeToVerify'],
-            joined_game
-        )
+        # Store in memory
+        username_lower = data['robloxUsername'].lower()
+        verifications[username_lower] = {
+            'robloxUsername': data['robloxUsername'],
+            'robloxID': data['robloxID'],
+            'discordUsername': data['discordUsername'],
+            'discordID': data['discordID'],
+            'timeToVerify': data['timeToVerify'],
+            'joinedGame': joined_game
+        }
         
-        if success:
-            return jsonify({
-                'returnCode': 201,
-                'response': 'Verification data created/updated successfully',
-                'robloxUsername': data['robloxUsername'],
-                'robloxID': data['robloxID'],
-                'discordUsername': data['discordUsername'],
-                'discordID': data['discordID'],
-                'timeToVerify': data['timeToVerify'],
-                'joinedGame': joined_game
-            }), 201
-        else:
-            return jsonify({
-                'returnCode': 500,
-                'response': 'Failed to create verification data'
-            }), 500
+        return jsonify({
+            'returnCode': 201,
+            'response': 'Verification data created/updated successfully',
+            'robloxUsername': data['robloxUsername'],
+            'robloxID': data['robloxID'],
+            'discordUsername': data['discordUsername'],
+            'discordID': data['discordID'],
+            'timeToVerify': data['timeToVerify'],
+            'joinedGame': joined_game
+        }), 201
             
     except Exception as e:
         return jsonify({
@@ -133,19 +119,30 @@ def get_verification(roblox_username):
     Returns 404 if user not found or verification expired
     """
     try:
-        # Get verification data
-        verification = get_verification_by_username(roblox_username)
+        username_lower = roblox_username.lower()
         
-        if not verification:
+        if username_lower not in verifications:
             return jsonify({
                 'returnCode': 404,
                 'response': 'Unable to fetch user details'
             }), 404
         
+        verification = verifications[username_lower]
+        
         # Check if verification has expired
-        if check_and_delete_expired(verification['timeToVerify']):
+        try:
+            # Try parsing as Unix timestamp (seconds)
+            expiry_time = datetime.fromtimestamp(float(verification['timeToVerify']))
+        except (ValueError, TypeError):
+            # Try parsing as ISO 8601
+            try:
+                expiry_time = datetime.fromisoformat(verification['timeToVerify'].replace('Z', '+00:00'))
+            except:
+                expiry_time = None
+        
+        if expiry_time and datetime.now() > expiry_time:
             # Delete expired verification
-            delete_verification_by_username(roblox_username)
+            del verifications[username_lower]
             return jsonify({
                 'returnCode': 404,
                 'response': 'Unable to fetch user details'
@@ -177,10 +174,10 @@ def delete_verification(roblox_username):
     DELETE endpoint to remove verification data by Roblox username
     """
     try:
-        # Delete verification
-        success = delete_verification_by_username(roblox_username)
+        username_lower = roblox_username.lower()
         
-        if success:
+        if username_lower in verifications:
+            del verifications[username_lower]
             return jsonify({
                 'returnCode': 200,
                 'response': f'Verification data for {roblox_username} deleted successfully'
@@ -243,8 +240,6 @@ def method_not_allowed(error):
 
 if __name__ == '__main__':
     import os
-    # Initialize database on startup
-    init_database()
     # Run the Flask app (Railway provides PORT env variable)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
